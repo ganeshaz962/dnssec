@@ -440,6 +440,7 @@ def onboard_domain(
     if az_ds:
         ds_to_add.append(("Azure", az_ds))
 
+    gd_failed = []
     for label, ds in ds_to_add:
         if str(ds["key_tag"]) in existing_tags:
             print(f"    GoDaddy DS ({label}): key_tag={ds['key_tag']} already exists — skipped")
@@ -449,8 +450,12 @@ def onboard_domain(
                 ds["key_tag"], ds["algorithm"], ds["digest_type"], ds["digest"],
                 label,
             ):
-                print(f"  ERROR: Failed to add {label} DS to GoDaddy")
-                return False
+                gd_failed.append(label)
+
+    if gd_failed:
+        print(f"  ERROR: Failed to add DS record(s) to GoDaddy: {', '.join(gd_failed)}")
+        print(f"  Add all DS records listed above manually, then re-run to validate.")
+        return False
 
     # Step 6: Validate
     print("  Step 6/6: Validating DNSSEC...")
