@@ -35,8 +35,8 @@ import yaml
 CF_API = "https://api.cloudflare.com/client/v4"
 GODADDY_API = "https://api.godaddy.com"
 
-DEFAULT_RG = "SAS-WEU-DNS_Zones-RG"
-DEFAULT_SUB = "SAS-DMZ-Infrastructure"
+DEFAULT_RG = "My-site-rg"
+DEFAULT_SUB = "Pay-As-You-Go"
 
 
 # ── Helpers ──────────────────────────────────────────────
