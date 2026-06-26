@@ -213,6 +213,17 @@ def gd_get_existing_ds(domain: str) -> list:
     return records
 
 
+def _gd_manual_instructions(action: str, domain: str, key_tag: int, algorithm: int, digest_type: int, digest: str) -> None:
+    """Print GoDaddy web portal instructions when the API is unavailable for personal accounts."""
+    print(f"    *** MANUAL ACTION REQUIRED in GoDaddy portal ***")
+    print(f"    URL: https://dcc.godaddy.com/manage/{domain}/dns")
+    print(f"    DNS tab -> DS Records -> {action} DS Record")
+    print(f"      Key Tag:     {key_tag}")
+    print(f"      Algorithm:   {algorithm}")
+    print(f"      Digest Type: {digest_type}")
+    print(f"      Digest:      {digest}")
+
+
 def gd_add_ds(
     api_key: str, api_secret: str, customer_id: str, domain: str,
     key_tag: int, algorithm: int, digest_type: int, digest: str,
@@ -232,6 +243,11 @@ def gd_add_ds(
     if resp.status_code in (409, 422) or "duplicate" in error_text or "already" in error_text:
         print(f"    GoDaddy DS ({label}): key_tag={key_tag} already registered — skipped")
         return True
+    if resp.status_code == 403:
+        print(f"    GoDaddy DS ({label}): API returned 403 — v2 DNSSEC API requires a reseller account.")
+        print(f"    Add this DS record manually in the GoDaddy portal:")
+        _gd_manual_instructions("Add", domain, key_tag, algorithm, digest_type, digest)
+        return False
     print(f"    GoDaddy DS ({label}) failed: HTTP {resp.status_code} — {resp.text[:200]}")
     return False
 
