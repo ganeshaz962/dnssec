@@ -1,23 +1,22 @@
 name: DNSSEC KSK Rotation Check
 
-# Detects KSK rotation by comparing provider key_tags against DS records at CSC.
+# Detects KSK rotation by comparing provider key_tags against DS records at GoDaddy.
 #
 # Two-job flow:
 #
 #   detect-and-add  (automatic)
-#     Phase 1: query Cloudflare + Azure, detect mismatched key_tags, add new DS to CSC.
-#     Phase 2: poll DNS every 60s until the new DS is visible per domain.
+#     Phase 1: query Cloudflare, detect mismatched key_tags, add new DS to GoDaddy.
+#     Phase 2: poll DNS every 60s until the new DS is visible.
 #     Writes rotation-plan.json and uploads it as an artifact.
 #     Sends Slack alert with a link to approve the next job.
 #
 #   review-and-remove  (requires approval — environment: dnssec-rotation-approve)
-#     Phase 3: download plan, remove stale DS records from CSC, send Slack completion.
+#     Phase 3: download plan, remove stale DS records from GoDaddy, send Slack completion.
 #
 # SETUP REQUIRED:
 #   Create a GitHub environment named 'dnssec-rotation-approve' in:
 #   Repo Settings → Environments → New environment
-#   Add required reviewers (cloud-platform, network-security).
-#   GitHub will email reviewers and pause the workflow until approved.
+#   Add required reviewers. GitHub will email reviewers and pause the workflow.
 #
 # Triggers:
 #   - Daily at 07:00 UTC
@@ -60,14 +59,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r dnssec/requirements.txt
 
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.CDX_ADMIN_CLIENT_ID }}
-          client-secret: ${{ secrets.CDX_ADMIN_CLIENT_SECRET }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: cdx-common
-
       - name: Detect rotation & add new DS records
         id: run
         run: |
@@ -80,9 +71,10 @@ jobs:
             --plan-file rotation-plan.json \
             $DRY_RUN_FLAG
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
-          CSC_API_KEY: ${{ secrets.CSC_API_KEY }}
-          CSC_BEARER_TOKEN: ${{ secrets.CSC_BEARER_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GODADDY_API_KEY: ${{ secrets.GODADDY_API_KEY }}
+          GODADDY_API_SECRET: ${{ secrets.GODADDY_API_SECRET }}
+          GODADDY_CUSTOMER_ID: ${{ secrets.GODADDY_CUSTOMER_ID }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           # DS_PROPAGATION_WAIT: '900'   # override poll timeout in seconds (default: 900)
 
@@ -129,7 +121,7 @@ jobs:
         with:
           name: rotation-plan
 
-      - name: Remove stale DS records from CSC
+      - name: Remove stale DS records from GoDaddy
         run: |
           DRY_RUN_FLAG=""
           if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then
@@ -140,7 +132,8 @@ jobs:
             --plan-file rotation-plan.json \
             $DRY_RUN_FLAG
         env:
-          # Phase 3 only calls CSC API — no Cloudflare token or Azure login needed
-          CSC_API_KEY: ${{ secrets.CSC_API_KEY }}
-          CSC_BEARER_TOKEN: ${{ secrets.CSC_BEARER_TOKEN }}
+          # Phase 3 only calls GoDaddy REST API — no Cloudflare token or Azure login needed
+          GODADDY_API_KEY: ${{ secrets.GODADDY_API_KEY }}
+          GODADDY_API_SECRET: ${{ secrets.GODADDY_API_SECRET }}
+          GODADDY_CUSTOMER_ID: ${{ secrets.GODADDY_CUSTOMER_ID }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
