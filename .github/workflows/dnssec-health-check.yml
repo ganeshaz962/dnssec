@@ -1,0 +1,25 @@
+name: DNSSEC Health Check
+
+on:
+  schedule:
+    # Runs once every two weeks (1st and 15th of each month) at 07:00 UTC
+    - cron: '0 7 1,15 * *'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: read
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run DNSSEC health check
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_CLOUDFLARE_NOTIFICATION }}
+        run: |
+          chmod +x dnssec/health-check.sh
+          cd dnssec
+          ./health-check.sh

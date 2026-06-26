@@ -1,0 +1,146 @@
+name: DNSSEC KSK Rotation Check
+
+# Detects KSK rotation by comparing provider key_tags against DS records at CSC.
+#
+# Two-job flow:
+#
+#   detect-and-add  (automatic)
+#     Phase 1: query Cloudflare + Azure, detect mismatched key_tags, add new DS to CSC.
+#     Phase 2: poll DNS every 60s until the new DS is visible per domain.
+#     Writes rotation-plan.json and uploads it as an artifact.
+#     Sends Slack alert with a link to approve the next job.
+#
+#   review-and-remove  (requires approval — environment: dnssec-rotation-approve)
+#     Phase 3: download plan, remove stale DS records from CSC, send Slack completion.
+#
+# SETUP REQUIRED:
+#   Create a GitHub environment named 'dnssec-rotation-approve' in:
+#   Repo Settings → Environments → New environment
+#   Add required reviewers (cloud-platform, network-security).
+#   GitHub will email reviewers and pause the workflow until approved.
+#
+# Triggers:
+#   - Daily at 07:00 UTC
+#   - Manually via Actions UI (dry_run option available)
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — preview Phase 1+2 without making any changes'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  detect-and-add:
+    name: Phase 1+2 — Detect rotation & add new DS records
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      has_pending_removals: ${{ steps.run.outputs.has_pending_removals }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: dnssec/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r dnssec/requirements.txt
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.CDX_ADMIN_CLIENT_ID }}
+          client-secret: ${{ secrets.CDX_ADMIN_CLIENT_SECRET }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: cdx-common
+
+      - name: Detect rotation & add new DS records
+        id: run
+        run: |
+          DRY_RUN_FLAG=""
+          if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          python dnssec/ksk_rotation.py \
+            --phase detect-add \
+            --plan-file rotation-plan.json \
+            $DRY_RUN_FLAG
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
+          CSC_API_KEY: ${{ secrets.CSC_API_KEY }}
+          CSC_BEARER_TOKEN: ${{ secrets.CSC_BEARER_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          # DS_PROPAGATION_WAIT: '900'   # override poll timeout in seconds (default: 900)
+
+      - name: Upload rotation plan
+        # Only upload when there are confirmed domains waiting for stale removal
+        if: steps.run.outputs.has_pending_removals == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rotation-plan
+          path: rotation-plan.json
+          retention-days: 1   # short-lived — plan is consumed by the next job
+
+
+  review-and-remove:
+    name: Phase 3 — Remove stale DS records (requires approval)
+    needs: detect-and-add
+    # Only runs when Phase 1+2 confirmed new DS records are live in DNS
+    if: needs.detect-and-add.outputs.has_pending_removals == 'true'
+    # ── APPROVAL GATE ──────────────────────────────────────────────────────
+    # GitHub pauses here and emails reviewers configured on this environment.
+    # Reviewers inspect the rotation-plan.json artifact, then click Approve.
+    # Configure reviewers at: Repo Settings → Environments → dnssec-rotation-approve
+    environment: dnssec-rotation-approve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: dnssec/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r dnssec/requirements.txt
+
+      - name: Download rotation plan
+        uses: actions/download-artifact@v4
+        with:
+          name: rotation-plan
+
+      - name: Remove stale DS records from CSC
+        run: |
+          DRY_RUN_FLAG=""
+          if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          python dnssec/ksk_rotation.py \
+            --phase remove \
+            --plan-file rotation-plan.json \
+            $DRY_RUN_FLAG
+        env:
+          # Phase 3 only calls CSC API — no Cloudflare token or Azure login needed
+          CSC_API_KEY: ${{ secrets.CSC_API_KEY }}
+          CSC_BEARER_TOKEN: ${{ secrets.CSC_BEARER_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
