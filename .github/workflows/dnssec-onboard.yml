@@ -1,16 +1,33 @@
 name: DNSSEC Onboard
 
+# Enables DNSSEC on Cloudflare + Azure DNS and registers DS records at GoDaddy.
+#
+# Two-job flow:
+#
+#   dry-run   (automatic on every push to config.yaml or manual trigger)
+#     Validates Cloudflare zone, Azure subscription/RG exist.
+#     No changes made.
+#
+#   onboard   (requires approval — environment: dnssec-onboard-approve)
+#     Enables DNSSEC on Cloudflare + Azure.
+#     Extracts DS records from both.
+#     Adds DS records to GoDaddy.
+#     Validates with dig.
+#
+# Triggers:
+#   - Push to main that modifies config.yaml
+#   - Manually via Actions UI
+
 on:
   push:
     paths:
-      - 'dnssec/config.yaml'
+      - 'config.yaml'
     branches:
       - main
-      - 'feature/**'
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Run in dry-run mode (preview only)'
+        description: 'Dry-run only (preview, no changes)'
         required: false
         type: boolean
         default: true
@@ -24,96 +41,76 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Validate secrets
-        run: |
-          errors=0
-          for secret_name in CLOUDFLARE_API_TOKEN CSC_API_KEY CSC_BEARER_TOKEN; do
-            eval "val=\${$secret_name}"
-            if [ -z "$val" ]; then
-              echo "Error: $secret_name secret is not set"
-              errors=1
-            fi
-          done
-          [ $errors -eq 0 ] || exit 1
-          echo "Secrets validated successfully"
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
-          CSC_API_KEY: ${{ secrets.CSC_API_KEY }}
-          CSC_BEARER_TOKEN: ${{ secrets.CSC_BEARER_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
           cache: 'pip'
-          cache-dependency-path: 'dnssec/requirements.txt'
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
-        run: pip install -r dnssec/requirements.txt
+        run: pip install -r requirements.txt
 
-      - name: Azure Login
-        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
+      - name: Azure login
+        uses: azure/login@v2
         with:
-          allow-no-subscriptions: true
-          creds: |
-            {
-              "clientId": "${{ secrets.CDX_ADMIN_CLIENT_ID }}",
-              "clientSecret": "${{ secrets.CDX_ADMIN_CLIENT_SECRET }}",
-              "tenantId": "5581c9a8-168b-45f0-abd4-d375da99bf9f",
-              "subscriptionId": ""
-            }
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Dry-run preview
-        run: |
-          cd dnssec
-          python onboard_domains.py --dry-run
+        run: python onboard_domains.py --dry-run
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
-          CSC_API_KEY: ${{ secrets.CSC_API_KEY }}
-          CSC_BEARER_TOKEN: ${{ secrets.CSC_BEARER_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GODADDY_API_KEY: ${{ secrets.GODADDY_API_KEY }}
+          GODADDY_API_SECRET: ${{ secrets.GODADDY_API_SECRET }}
+          GODADDY_CUSTOMER_ID: ${{ secrets.GODADDY_CUSTOMER_ID }}
+
 
   onboard:
     name: Onboard Domains
     runs-on: ubuntu-latest
     needs: dry-run
-    environment: requires_approval
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'false'))
+    # Approval gate — pauses until a reviewer approves in GitHub Actions UI.
+    # Configure reviewers at: Repo Settings → Environments → dnssec-onboard-approve
+    environment: dnssec-onboard-approve
+    if: |
+      github.ref == 'refs/heads/main' && (
+        github.event_name == 'push' ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'false')
+      )
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
           cache: 'pip'
-          cache-dependency-path: 'dnssec/requirements.txt'
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
-        run: pip install -r dnssec/requirements.txt
+        run: pip install -r requirements.txt
 
-      - name: Azure Login
-        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
+      - name: Azure login
+        uses: azure/login@v2
         with:
-          allow-no-subscriptions: true
-          creds: |
-            {
-              "clientId": "${{ secrets.CDX_ADMIN_CLIENT_ID }}",
-              "clientSecret": "${{ secrets.CDX_ADMIN_CLIENT_SECRET }}",
-              "tenantId": "5581c9a8-168b-45f0-abd4-d375da99bf9f",
-              "subscriptionId": ""
-            }
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Onboard domains
-        run: |
-          cd dnssec
-          python onboard_domains.py
+        run: python onboard_domains.py
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
-          CSC_API_KEY: ${{ secrets.CSC_API_KEY }}
-          CSC_BEARER_TOKEN: ${{ secrets.CSC_BEARER_TOKEN }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_CLOUDFLARE_NOTIFICATION }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GODADDY_API_KEY: ${{ secrets.GODADDY_API_KEY }}
+          GODADDY_API_SECRET: ${{ secrets.GODADDY_API_SECRET }}
+          GODADDY_CUSTOMER_ID: ${{ secrets.GODADDY_CUSTOMER_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
