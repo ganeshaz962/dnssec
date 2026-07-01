@@ -366,7 +366,7 @@ def write_plan_file(
 ) -> None:
     """Write rotation plan to JSON for hand-off to the approval-gated remove job."""
     plan = {
-        "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "generated_at": datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z"),
         "confirmed": confirmed,   # domain → stale CSC records to delete
         "timed_out": timed_out,
         "rotated": rotated,
