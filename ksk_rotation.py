@@ -619,6 +619,15 @@ def remove_stale_records(
         old_alg = r.get("algorithm", 13)
         old_digest_type = r.get("digestType", r.get("digest_type", 2))
         old_digest = r.get("digest", "")
+
+        # Check if the record is already gone from public DNS (e.g. manually removed
+        # from the registrar portal before this job ran). If it's not visible, treat
+        # deletion as already done — no API call needed.
+        current_tags = {r2.get("keyTag") for r2 in gd_get_ds_records(domain)}
+        if old_tag not in current_tags:
+            print(f"    stale key_tag={old_tag}: already gone from DNS — skipped API call")
+            continue
+
         success = gd_delete_ds(
             gd_api_key, gd_api_secret, gd_customer_id, domain,
             old_tag, old_alg, old_digest_type, old_digest,
