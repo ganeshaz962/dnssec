@@ -1,7 +1,7 @@
 # DNSSEC Domain Registry — Personal testing configuration
 #
 # Registrar: GoDaddy (personal account)
-# Provider:  Cloudflare + Azure DNS (Independent Signer model)
+# Provider:  Cloudflare only (azure: false — Azure DNS removed)
 #
 # Required environment variables:
 #   CLOUDFLARE_API_TOKEN  — API token from dash.cloudflare.com/profile/api-tokens
@@ -9,12 +9,7 @@
 #   GODADDY_API_SECRET    — API secret from developer.godaddy.com/keys
 #   GODADDY_CUSTOMER_ID   — Your customer number from the GoDaddy portal
 #                           (Account Settings → Customer Number)
-#   AZURE credentials     — az login / service principal for Azure CLI
-#
-# Default Azure settings (from ksk_rotation.py):
-#   azure_resource_group: My-site-rg
-#   azure_subscription:   Pay-As-You-Go
-# Override per-domain if needed.
 
 domains:
-  ttgfriends.in: {}   # uses DEFAULT_RG=My-site-rg, DEFAULT_SUB=Pay-As-You-Go
+  ttgfriends.in:
+    azure: false
