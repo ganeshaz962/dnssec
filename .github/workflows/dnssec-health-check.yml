@@ -18,8 +18,7 @@ jobs:
 
       - name: Run DNSSEC health check
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_CLOUDFLARE_NOTIFICATION }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          chmod +x dnssec/health-check.sh
-          cd dnssec
+          chmod +x health-check.sh
           ./health-check.sh
